@@ -1,26 +1,56 @@
 pipeline {
     agent any
 
+    environment {
+        // Securely pulling your Claude API Key from Jenkins Credentials
+        CLAUDE_API_KEY = credentials('CLAUDE_API_KEY')
+    }
+
     stages {
-        stage('Clone Repository') {
+        stage('Initialize & Sync') {
             steps {
-                // This step automatically downloads your code from GitHub
+                // 1. Download your latest code from Git
                 checkout scm
-                echo 'Code successfully downloaded!'
+                
+                // 2. Fallback: Sync local files if they aren't in Git yet
+                // (Matches your current local setup)
+                sh 'cp /home/ubuntu/claude/*.py . || true'
+                sh 'cp /home/ubuntu/claude/Dockerfile . || true'
+                
+                echo 'Environment prepared and files synced.'
             }
         }
-        
-        stage('Setup Environment') {
+
+        stage('Deploy App') {
             steps {
-                // This is where you will eventually install Python requirements
-                echo 'Preparing environment for scraper.py and bot.py...'
+                sh '''
+                    # Setup logging
+                    touch app.log
+                    chmod 666 app.log
+                    
+                    # Build and cycle container
+                    docker build -t security-app .
+                    docker stop my-app || true && docker rm my-app || true
+                    
+                    # Run with Environment Variable and Volume
+                    docker run -d --name my-app \
+                    -p 5000:5000 \
+                    -e CLAUDE_API_KEY=${CLAUDE_API_KEY} \
+                    -v "$(pwd)/app.log:/app/logs/app.log" \
+                    security-app
+                '''
             }
         }
-        
-        stage('Execute AI Agent') {
+
+        stage('Start AI Sentinel') {
             steps {
-                // This is where you will trigger the C2C job search execution
-                echo 'Initializing Open Claw AI automation...'
+                sh '''
+                    # Stop old sentinel processes
+                    pkill -f security.py || true
+                    
+                    # Start the Python Sentinel in the background
+                    nohup python3 -u security.py > sentinel.log 2>&1 &
+                '''
             }
         }
     }
